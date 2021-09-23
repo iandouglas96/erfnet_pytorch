@@ -17,6 +17,9 @@ class DownsamplerBlock (nn.Module):
         self.bn = nn.BatchNorm2d(noutput, eps=1e-3)
 
     def forward(self, input):
+        print(input.shape)
+        print(self.conv(input).shape)
+        print(self.pool(input).shape)
         output = torch.cat([self.conv(input), self.pool(input)], 1)
         output = self.bn(output)
         return F.relu(output)
@@ -84,6 +87,7 @@ class Encoder(nn.Module):
         self.output_conv = nn.Conv2d(128, num_classes, 1, stride=1, padding=0, bias=True)
 
     def forward(self, input, predict=False):
+        print(input.shape)
         output = self.initial_block(input)
 
         for layer in self.layers:

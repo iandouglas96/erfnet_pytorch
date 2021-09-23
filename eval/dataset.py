@@ -98,3 +98,43 @@ class cityscapes(Dataset):
     def __len__(self):
         return len(self.filenames)
 
+class penn(Dataset):
+
+    def __init__(self, root, input_transform=None, target_transform=None, subset='val'):
+        self.images_root = os.path.join(root, 'images/' + subset)
+        self.labels_root = os.path.join(root, 'labels/' + subset)
+
+        self.filenames = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(self.images_root)) for f in fn if is_image(f)]
+        self.filenames.sort()
+
+        self.filenamesGt = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(self.labels_root)) for f in fn if is_label(f)]
+        self.filenamesGt.sort()
+
+        self.input_transform = input_transform
+        self.target_transform = target_transform
+
+    def __getitem__(self, index):
+        filename = self.filenames[index]
+        filenameGt = filename
+        try:
+            filenameGt = self.filenamesGt[index]
+        except IndexError:
+            pass
+
+        #print(filename)
+
+        with open(image_path_city(self.images_root, filename), 'rb') as f:
+            image = load_image(f).convert('RGB')
+        with open(image_path_city(self.labels_root, filenameGt), 'rb') as f:
+            label = load_image(f).convert('L')
+
+        if self.input_transform is not None:
+            image = self.input_transform(image)
+        if self.target_transform is not None:
+            label = self.target_transform(label)
+
+        return image, label, filename, filenameGt
+
+    def __len__(self):
+        return len(self.filenames)
+
