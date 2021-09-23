@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Main code for training ERFNet model in Cityscapes dataset
 # Sept 2017
 # Eduardo Romera
@@ -10,7 +11,7 @@ import numpy as np
 import torch
 import math
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageEnhance
 from argparse import ArgumentParser
 
 from torch.optim import SGD, Adam, lr_scheduler
@@ -19,7 +20,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, CenterCrop, Normalize, Resize, Pad
 from torchvision.transforms import ToTensor, ToPILImage
 
-from dataset import VOC12,cityscapes
+from dataset import VOC12,cityscapes,penn
 from transform import Relabel, ToLabel, Colorize
 from visualize import Dashboard
 
@@ -29,7 +30,7 @@ from iouEval import iouEval, getColorEntry
 from shutil import copyfile
 
 NUM_CHANNELS = 3
-NUM_CLASSES = 20 #pascal=22, cityscapes=20
+NUM_CLASSES = 4 #pascal=22, cityscapes=20
 
 color_transform = Colorize(NUM_CLASSES)
 image_transform = ToPILImage()
@@ -41,34 +42,36 @@ class MyCoTransform(object):
         self.augment = augment
         self.height = height
         pass
-    def __call__(self, input, target):
+    def __call__(self, input_img, target):
         # do something to both images
-        input =  Resize(self.height, Image.BILINEAR)(input)
+        input_img =  Resize(self.height, Image.BILINEAR)(input_img)
         target = Resize(self.height, Image.NEAREST)(target)
 
         if(self.augment):
             # Random hflip
             hflip = random.random()
             if (hflip < 0.5):
-                input = input.transpose(Image.FLIP_LEFT_RIGHT)
+                input_img = input_img.transpose(Image.FLIP_LEFT_RIGHT)
                 target = target.transpose(Image.FLIP_LEFT_RIGHT)
             
             #Random translation 0-2 pixels (fill rest with padding
             transX = random.randint(-2, 2) 
             transY = random.randint(-2, 2)
 
-            input = ImageOps.expand(input, border=(transX,transY,0,0), fill=0)
+            input_img = ImageEnhance.Brightness(input_img).enhance(random.uniform(0.8, 1.2))
+            input_img = ImageEnhance.Contrast(input_img).enhance(random.uniform(0.8, 1.2))
+            input_img = ImageOps.expand(input_img, border=(transX,transY,0,0), fill=0)
             target = ImageOps.expand(target, border=(transX,transY,0,0), fill=255) #pad label filling with 255
-            input = input.crop((0, 0, input.size[0]-transX, input.size[1]-transY))
+            input_img = input_img.crop((0, 0, input_img.size[0]-transX, input_img.size[1]-transY))
             target = target.crop((0, 0, target.size[0]-transX, target.size[1]-transY))   
 
-        input = ToTensor()(input)
+        input_img = ToTensor()(input_img)
         if (self.enc):
             target = Resize(int(self.height/8), Image.NEAREST)(target)
         target = ToLabel()(target)
-        target = Relabel(255, 19)(target)
+        #target = Relabel(255, 19)(target)
 
-        return input, target
+        return input_img, target
 
 
 class CrossEntropyLoss2d(torch.nn.Module):
@@ -76,7 +79,7 @@ class CrossEntropyLoss2d(torch.nn.Module):
     def __init__(self, weight=None):
         super().__init__()
 
-        self.loss = torch.nn.NLLLoss2d(weight)
+        self.loss = torch.nn.NLLLoss(weight, ignore_index=255)
 
     def forward(self, outputs, targets):
         return self.loss(torch.nn.functional.log_softmax(outputs, dim=1), targets)
@@ -89,55 +92,55 @@ def train(args, model, enc=False):
     #create a loder to run all images and calculate histogram of labels, then create weight array using class balancing
 
     weight = torch.ones(NUM_CLASSES)
-    if (enc):
-        weight[0] = 2.3653597831726	
-        weight[1] = 4.4237880706787	
-        weight[2] = 2.9691488742828	
-        weight[3] = 5.3442072868347	
-        weight[4] = 5.2983593940735	
-        weight[5] = 5.2275490760803	
-        weight[6] = 5.4394111633301	
-        weight[7] = 5.3659925460815	
-        weight[8] = 3.4170460700989	
-        weight[9] = 5.2414722442627	
-        weight[10] = 4.7376127243042	
-        weight[11] = 5.2286224365234	
-        weight[12] = 5.455126285553	
-        weight[13] = 4.3019247055054	
-        weight[14] = 5.4264230728149	
-        weight[15] = 5.4331531524658	
-        weight[16] = 5.433765411377	
-        weight[17] = 5.4631009101868	
-        weight[18] = 5.3947434425354
-    else:
-        weight[0] = 2.8149201869965	
-        weight[1] = 6.9850029945374	
-        weight[2] = 3.7890393733978	
-        weight[3] = 9.9428062438965	
-        weight[4] = 9.7702074050903	
-        weight[5] = 9.5110931396484	
-        weight[6] = 10.311357498169	
-        weight[7] = 10.026463508606	
-        weight[8] = 4.6323022842407	
-        weight[9] = 9.5608062744141	
-        weight[10] = 7.8698215484619	
-        weight[11] = 9.5168733596802	
-        weight[12] = 10.373730659485	
-        weight[13] = 6.6616044044495	
-        weight[14] = 10.260489463806	
-        weight[15] = 10.287888526917	
-        weight[16] = 10.289801597595	
-        weight[17] = 10.405355453491	
-        weight[18] = 10.138095855713	
+    #if (enc):
+    #    weight[0] = 2.3653597831726	
+    #    weight[1] = 4.4237880706787	
+    #    weight[2] = 2.9691488742828	
+    #    weight[3] = 5.3442072868347	
+    #    weight[4] = 5.2983593940735	
+    #    weight[5] = 5.2275490760803	
+    #    weight[6] = 5.4394111633301	
+    #    weight[7] = 5.3659925460815	
+    #    weight[8] = 3.4170460700989	
+    #    weight[9] = 5.2414722442627	
+    #    weight[10] = 4.7376127243042	
+    #    weight[11] = 5.2286224365234	
+    #    weight[12] = 5.455126285553	
+    #    weight[13] = 4.3019247055054	
+    #    weight[14] = 5.4264230728149	
+    #    weight[15] = 5.4331531524658	
+    #    weight[16] = 5.433765411377	
+    #    weight[17] = 5.4631009101868	
+    #    weight[18] = 5.3947434425354
+    #else:
+    #    weight[0] = 2.8149201869965	
+    #    weight[1] = 6.9850029945374	
+    #    weight[2] = 3.7890393733978	
+    #    weight[3] = 9.9428062438965	
+    #    weight[4] = 9.7702074050903	
+    #    weight[5] = 9.5110931396484	
+    #    weight[6] = 10.311357498169	
+    #    weight[7] = 10.026463508606	
+    #    weight[8] = 4.6323022842407	
+    #    weight[9] = 9.5608062744141	
+    #    weight[10] = 7.8698215484619	
+    #    weight[11] = 9.5168733596802	
+    #    weight[12] = 10.373730659485	
+    #    weight[13] = 6.6616044044495	
+    #    weight[14] = 10.260489463806	
+    #    weight[15] = 10.287888526917	
+    #    weight[16] = 10.289801597595	
+    #    weight[17] = 10.405355453491	
+    #    weight[18] = 10.138095855713	
 
-    weight[19] = 0
+    #weight[19] = 0
 
     assert os.path.exists(args.datadir), "Error: datadir (dataset directory) could not be loaded"
 
     co_transform = MyCoTransform(enc, augment=True, height=args.height)#1024)
     co_transform_val = MyCoTransform(enc, augment=False, height=args.height)#1024)
-    dataset_train = cityscapes(args.datadir, co_transform, 'train')
-    dataset_val = cityscapes(args.datadir, co_transform_val, 'val')
+    dataset_train = penn(args.datadir, co_transform, '')
+    dataset_val = penn(args.datadir, co_transform_val, 'no_val')
 
     loader = DataLoader(dataset_train, num_workers=args.num_workers, batch_size=args.batch_size, shuffle=True)
     loader_val = DataLoader(dataset_val, num_workers=args.num_workers, batch_size=args.batch_size, shuffle=False)
@@ -225,7 +228,7 @@ def train(args, model, enc=False):
 
             inputs = Variable(images)
             targets = Variable(labels)
-            outputs = model(inputs, only_encode=enc)
+            outputs = model(inputs, enc)
 
             #print("targets", np.unique(targets[:, 0].cpu().data.numpy()))
 
@@ -234,7 +237,7 @@ def train(args, model, enc=False):
             loss.backward()
             optimizer.step()
 
-            epoch_loss.append(loss.data[0])
+            epoch_loss.append(loss.data.item())
             time_train.append(time.time() - start_time)
 
             if (doIouTrain):
@@ -283,47 +286,50 @@ def train(args, model, enc=False):
         if (doIouVal):
             iouEvalVal = iouEval(NUM_CLASSES)
 
-        for step, (images, labels) in enumerate(loader_val):
-            start_time = time.time()
-            if args.cuda:
-                images = images.cuda()
-                labels = labels.cuda()
+        with torch.no_grad():
+            for step, (images, labels) in enumerate(loader_val):
+                start_time = time.time()
+                if args.cuda:
+                    images = images.cuda()
+                    labels = labels.cuda()
 
-            inputs = Variable(images, volatile=True)    #volatile flag makes it free backward or outputs for eval
-            targets = Variable(labels, volatile=True)
-            outputs = model(inputs, only_encode=enc) 
+                inputs = Variable(images, volatile=True)    #volatile flag makes it free backward or outputs for eval
+                targets = Variable(labels, volatile=True)
+                outputs = model(inputs, enc) 
 
-            loss = criterion(outputs, targets[:, 0])
-            epoch_loss_val.append(loss.data[0])
-            time_val.append(time.time() - start_time)
+                loss = criterion(outputs, targets[:, 0])
+                epoch_loss_val.append(loss.data.item())
+                time_val.append(time.time() - start_time)
 
 
-            #Add batch to calculate TP, FP and FN for iou estimation
-            if (doIouVal):
-                #start_time_iou = time.time()
-                iouEvalVal.addBatch(outputs.max(1)[1].unsqueeze(1).data, targets.data)
-                #print ("Time to add confusion matrix: ", time.time() - start_time_iou)
+                #Add batch to calculate TP, FP and FN for iou estimation
+                if (doIouVal):
+                    #start_time_iou = time.time()
+                    iouEvalVal.addBatch(outputs.max(1)[1].unsqueeze(1).data, targets.data)
+                    #print ("Time to add confusion matrix: ", time.time() - start_time_iou)
 
-            if args.visualize and args.steps_plot > 0 and step % args.steps_plot == 0:
-                start_time_plot = time.time()
-                image = inputs[0].cpu().data
-                board.image(image, f'VAL input (epoch: {epoch}, step: {step})')
-                if isinstance(outputs, list):   #merge gpu tensors
-                    board.image(color_transform(outputs[0][0].cpu().max(0)[1].data.unsqueeze(0)),
-                    f'VAL output (epoch: {epoch}, step: {step})')
-                else:
-                    board.image(color_transform(outputs[0].cpu().max(0)[1].data.unsqueeze(0)),
-                    f'VAL output (epoch: {epoch}, step: {step})')
-                board.image(color_transform(targets[0].cpu().data),
-                    f'VAL target (epoch: {epoch}, step: {step})')
-                print ("Time to paint images: ", time.time() - start_time_plot)
-            if args.steps_loss > 0 and step % args.steps_loss == 0:
-                average = sum(epoch_loss_val) / len(epoch_loss_val)
-                print(f'VAL loss: {average:0.4} (epoch: {epoch}, step: {step})', 
-                        "// Avg time/img: %.4f s" % (sum(time_val) / len(time_val) / args.batch_size))
+                if args.visualize and args.steps_plot > 0 and step % args.steps_plot == 0:
+                    start_time_plot = time.time()
+                    image = inputs[0].cpu().data
+                    board.image(image, f'VAL input (epoch: {epoch}, step: {step})')
+                    if isinstance(outputs, list):   #merge gpu tensors
+                        board.image(color_transform(outputs[0][0].cpu().max(0)[1].data.unsqueeze(0)),
+                        f'VAL output (epoch: {epoch}, step: {step})')
+                    else:
+                        board.image(color_transform(outputs[0].cpu().max(0)[1].data.unsqueeze(0)),
+                        f'VAL output (epoch: {epoch}, step: {step})')
+                    board.image(color_transform(targets[0].cpu().data),
+                        f'VAL target (epoch: {epoch}, step: {step})')
+                    print ("Time to paint images: ", time.time() - start_time_plot)
+                if args.steps_loss > 0 and step % args.steps_loss == 0:
+                    average = sum(epoch_loss_val) / len(epoch_loss_val)
+                    print(f'VAL loss: {average:0.4} (epoch: {epoch}, step: {step})', 
+                            "// Avg time/img: %.4f s" % (sum(time_val) / len(time_val) / args.batch_size))
                        
 
-        average_epoch_loss_val = sum(epoch_loss_val) / len(epoch_loss_val)
+        average_epoch_loss_val = 0
+        if len(epoch_loss_val) > 0:
+            average_epoch_loss_val = sum(epoch_loss_val) / len(epoch_loss_val)
         #scheduler.step(average_epoch_loss_val, epoch)  ## scheduler 1   # update lr if needed
 
         iouVal = 0
@@ -364,7 +370,7 @@ def train(args, model, enc=False):
         if args.epochs_save > 0 and step > 0 and step % args.epochs_save == 0:
             torch.save(model.state_dict(), filename)
             print(f'save: {filename} (epoch: {epoch})')
-        if (is_best):
+        if (is_best or average_epoch_loss_val == 0):
             torch.save(model.state_dict(), filenamebest)
             print(f'save: {filenamebest} (epoch: {epoch})')
             if (not enc):
@@ -488,7 +494,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--port', type=int, default=8097)
     parser.add_argument('--datadir', default=os.getenv("HOME") + "/datasets/cityscapes/")
-    parser.add_argument('--height', type=int, default=512)
+    parser.add_argument('--height', type=int, default=400)
     parser.add_argument('--num-epochs', type=int, default=150)
     parser.add_argument('--num-workers', type=int, default=4)
     parser.add_argument('--batch-size', type=int, default=6)
@@ -497,7 +503,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs-save', type=int, default=0)    #You can use this value to save model every X epochs
     parser.add_argument('--savedir', required=True)
     parser.add_argument('--decoder', action='store_true')
-    parser.add_argument('--pretrainedEncoder') #, default="../trained_models/erfnet_encoder_pretrained.pth.tar")
+    parser.add_argument('--pretrainedEncoder', default="../trained_models/erfnet_encoder_pretrained.pth.tar")
     parser.add_argument('--visualize', action='store_true')
 
     parser.add_argument('--iouTrain', action='store_true', default=False) #recommended: False (takes more time to train otherwise)
