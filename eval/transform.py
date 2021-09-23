@@ -8,6 +8,15 @@ import torch
 
 from PIL import Image
 
+def colormap_penn(n):
+    cmap=np.zeros([n, 3]).astype(np.uint8)
+    cmap[0,:] = np.array([0,0,255])
+    cmap[1,:] = np.array([0,255,0])
+    cmap[2,:] = np.array([255,0,0])
+    cmap[3,:] = np.array([0,100,0])
+    
+    return cmap
+
 def colormap_cityscapes(n):
     cmap=np.zeros([n, 3]).astype(np.uint8)
     cmap[0,:] = np.array([128, 64,128])
@@ -74,7 +83,8 @@ class Colorize:
 
     def __init__(self, n=22):
         #self.cmap = colormap(256)
-        self.cmap = colormap_cityscapes(256)
+        #self.cmap = colormap_cityscapes(256)
+        self.cmap = colormap_penn(256)
         self.cmap[n] = self.cmap[-1]
         self.cmap = torch.from_numpy(self.cmap[:n])
 

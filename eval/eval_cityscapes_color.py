@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, CenterCrop, Normalize, Resize
 from torchvision.transforms import ToTensor, ToPILImage
 
-from dataset import cityscapes
+from dataset import cityscapes, penn
 from erfnet import ERFNet
 from transform import Relabel, ToLabel, Colorize
 
@@ -24,18 +24,18 @@ import visdom
 
 
 NUM_CHANNELS = 3
-NUM_CLASSES = 20
+NUM_CLASSES = 4
 
 image_transform = ToPILImage()
 input_transform_cityscapes = Compose([
-    Resize((512,1024),Image.BILINEAR),
+    Resize((400,640),Image.BILINEAR),
     ToTensor(),
     #Normalize([.485, .456, .406], [.229, .224, .225]),
 ])
 target_transform_cityscapes = Compose([
-    Resize((512,1024),Image.NEAREST),
-    ToLabel(),
-    Relabel(255, 19),   #ignore label to 19
+    Resize((400,640),Image.NEAREST),
+    ToLabel()
+    #Relabel(255, 19),   #ignore label to 19
 ])
 
 cityscapes_trainIds2labelIds = Compose([
@@ -73,6 +73,7 @@ def main(args):
 
     #Import ERFNet model from the folder
     #Net = importlib.import_module(modelpath.replace("/", "."), "ERFNet")
+    print(NUM_CLASSES)
     model = ERFNet(NUM_CLASSES)
   
     model = torch.nn.DataParallel(model)
@@ -99,7 +100,7 @@ def main(args):
         print ("Error: datadir could not be loaded")
 
 
-    loader = DataLoader(cityscapes(args.datadir, input_transform_cityscapes, target_transform_cityscapes, subset=args.subset),
+    loader = DataLoader(penn(args.datadir, input_transform_cityscapes, target_transform_cityscapes, subset=args.subset),
         num_workers=args.num_workers, batch_size=args.batch_size, shuffle=False)
 
     # For visualizer:
@@ -122,7 +123,7 @@ def main(args):
         #label_cityscapes = cityscapes_trainIds2labelIds(label.unsqueeze(0))
         label_color = Colorize()(label.unsqueeze(0))
 
-        filenameSave = "./save_color/" + filename[0].split("leftImg8bit/")[1]
+        filenameSave = "./save_color/" + filename[0].split("images/")[1]
         os.makedirs(os.path.dirname(filenameSave), exist_ok=True)
         #image_transform(label.byte()).save(filenameSave)      
         label_save = ToPILImage()(label_color)           
@@ -142,7 +143,7 @@ if __name__ == '__main__':
     parser.add_argument('--loadDir',default="../trained_models/")
     parser.add_argument('--loadWeights', default="erfnet_pretrained.pth")
     parser.add_argument('--loadModel', default="erfnet.py")
-    parser.add_argument('--subset', default="val")  #can be val, test, train, demoSequence
+    parser.add_argument('--subset', default="")  #can be val, test, train, demoSequence
 
     parser.add_argument('--datadir', default=os.getenv("HOME") + "/datasets/cityscapes/")
     parser.add_argument('--num-workers', type=int, default=4)
@@ -151,3 +152,4 @@ if __name__ == '__main__':
 
     parser.add_argument('--visualize', action='store_true')
     main(parser.parse_args())
+
