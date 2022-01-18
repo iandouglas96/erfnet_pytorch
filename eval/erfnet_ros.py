@@ -1,82 +1,93 @@
+#!/usr/bin/env python3
 # Code to produce colored segmentation output in Pytorch for all cityscapes subsets  
 # Sept 2017
 # Eduardo Romera
 #######################
 
 import numpy as np
+import cv2
 import torch
 import os
 import importlib
 
-from PIL import Image
-from argparse import ArgumentParser
-
-from torch.autograd import Variable
-from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, CenterCrop, Normalize, Resize
-from torchvision.transforms import ToTensor, ToPILImage
-
-from dataset import cityscapes, penn
+from dataset import penn
 from erfnet import ERFNet
 from transform import Relabel, ToLabel, Colorize
 
+import rospy
+from sensor_msgs.msg import Image
 
 NUM_CHANNELS = 3
 NUM_CLASSES = 4
 
-def main(args):
-    modelpath = args.loadDir + args.loadModel
-    weightspath = args.loadDir + args.loadWeights
+class ERFNetWrapper:
+    def __init__(self, weights_path):
+        print ("Loading weights: " + weights_path)
 
-    print ("Loading model: " + modelpath)
-    print ("Loading weights: " + weightspath)
+        self.model_ = torch.nn.DataParallel(ERFNet(NUM_CLASSES))
+        self.model_ = self.model_.cuda()
 
-    #Import ERFNet model from the folder
-    #Net = importlib.import_module(modelpath.replace("/", "."), "ERFNet")
-    print(NUM_CLASSES)
-    model = ERFNet(NUM_CLASSES)
-  
-    model = torch.nn.DataParallel(model)
-    if (not args.cpu):
-        model = model.cuda()
+        def load_my_state_dict(model, state_dict):  #custom function to load model when not all dict elements
+            own_state = model.state_dict()
+            for name, param in state_dict.items():
+                if name not in own_state:
+                     continue
+                own_state[name].copy_(param)
+            return model
 
-    def load_my_state_dict(model, state_dict):  #custom function to load model when not all dict elements
-        own_state = model.state_dict()
-        for name, param in state_dict.items():
-            if name not in own_state:
-                 continue
-            own_state[name].copy_(param)
-        return model
+        self.model_ = load_my_state_dict(self.model_, torch.load(weights_path))
+        print ("Model and weights LOADED successfully")
+        self.model_.eval()
 
-    model = load_my_state_dict(model, torch.load(weightspath))
-    print ("Model and weights LOADED successfully")
+    def infer(self, img_np):
+        original_size = (img_np.shape[1], img_np.shape[0])
+        img_np = cv2.resize(img_np, (640, 400))
+        # BGR to RGB
+        img_np = np.flip(img_np, axis=2)
+        img_np = img_np.transpose((2, 0, 1)).astype(np.float32)/255.
+        img = torch.from_numpy(img_np[None, :]).cuda()
 
-    model.eval()
+        with torch.no_grad():
+            outputs = self.model_(img)
 
-    images = images.cuda()
+        label = outputs[0].max(0)[1].byte().cpu().data
+        label_color = Colorize()(label.unsqueeze(0))
+        label_np = cv2.resize(label.numpy(), original_size)
+        label_color_np = cv2.resize(label_color.numpy().transpose(1, 2, 0), original_size)
+        return label_np, label_color_np
 
-    with torch.no_grad():
-        outputs = model(images)
+class ERFNetRos:
+    def __init__(self):
+        self.erfnet_ = ERFNetWrapper('../trained_models/model_best.pth')
 
-    label = outputs[0].max(0)[1].byte().cpu().data
-    label_color = Colorize()(label.unsqueeze(0))
+        self.image_sub_ = rospy.Subscriber('image', Image, self.imageCallback, queue_size=10)
+        self.label_pub_ = rospy.Publisher('label', Image, queue_size=10)
+        self.label_viz_pub_ =rospy.Publisher('label_viz', Image, queue_size=1)
+
+    def imageCallback(self, img_msg):
+        img = np.frombuffer(img_msg.data, dtype=np.uint8).reshape(img_msg.height, img_msg.width, -1)
+        label, label_color = self.erfnet_.infer(img)
+        label_color = np.flip(label_color, axis=2)
+
+        label_viz_msg = Image()
+        label_viz_msg.header = img_msg.header
+        label_viz_msg.encoding = "bgr8"
+        label_viz_msg.height = label_color.shape[0]
+        label_viz_msg.width = label_color.shape[1]
+        label_viz_msg.step = label_viz_msg.width * 3
+        label_viz_msg.data = label_color.tobytes()
+        self.label_viz_pub_.publish(label_viz_msg)
+
+        label_msg = Image()
+        label_msg.header = img_msg.header
+        label_msg.encoding = "mono8"
+        label_msg.height = label.shape[0]
+        label_msg.width = label.shape[1]
+        label_msg.step = label_msg.width
+        label_msg.data = label.tobytes()
+        self.label_pub_.publish(label_msg)
     
 if __name__ == '__main__':
-    parser = ArgumentParser()
-
-    parser.add_argument('--state')
-
-    parser.add_argument('--loadDir',default="../trained_models/")
-    parser.add_argument('--loadWeights', default="model_best.pth")
-    parser.add_argument('--loadModel', default="erfnet.py")
-    parser.add_argument('--subset', default="")  #can be val, test, train, demoSequence
-
-    #parser.add_argument('--datadir', default="/media/ian/ResearchSSD/aerial_pennov/raw_imgs")
-    parser.add_argument('--datadir', default="/media/ian/ResearchSSD/grace_quarters/2021-11-01/pad_coverage1_images")
-    parser.add_argument('--num-workers', type=int, default=4)
-    parser.add_argument('--batch-size', type=int, default=1)
-    parser.add_argument('--cpu', action='store_true')
-
-    parser.add_argument('--visualize', action='store_true')
-    main(parser.parse_args())
-
+    rospy.init_node("erfnet_ros")
+    erfnet_ros = ERFNetRos()
+    rospy.spin()
