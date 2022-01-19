@@ -123,11 +123,14 @@ def main(args):
         #label_cityscapes = cityscapes_trainIds2labelIds(label.unsqueeze(0))
         label_color = Colorize()(label.unsqueeze(0))
 
-        filenameSave = "./save_color/" + filename[0].split("images/")[1]
+        print(filename)
+        filenameSave = "./save_color/" + filename[0].split("/images/")[1].split('.')[-2] + '_color.png'
+        filenameSaveInd = "./save_color/" + filename[0].split("/images/")[1].split('.')[-2] + '.png'
         os.makedirs(os.path.dirname(filenameSave), exist_ok=True)
         #image_transform(label.byte()).save(filenameSave)      
         label_save = ToPILImage()(label_color)           
-        label_save.save(filenameSave) 
+        label_save.save(filenameSave, format='png') 
+        ToPILImage()(label.unsqueeze(0)).save(filenameSaveInd, format='png')
 
         if (args.visualize):
             vis.image(label_color.numpy())
@@ -141,11 +144,12 @@ if __name__ == '__main__':
     parser.add_argument('--state')
 
     parser.add_argument('--loadDir',default="../trained_models/")
-    parser.add_argument('--loadWeights', default="erfnet_pretrained.pth")
+    parser.add_argument('--loadWeights', default="model_best.pth")
     parser.add_argument('--loadModel', default="erfnet.py")
     parser.add_argument('--subset', default="")  #can be val, test, train, demoSequence
 
-    parser.add_argument('--datadir', default=os.getenv("HOME") + "/datasets/cityscapes/")
+    #parser.add_argument('--datadir', default="/media/ian/ResearchSSD/aerial_pennov/raw_imgs")
+    parser.add_argument('--datadir', default="/media/ian/ResearchSSD/grace_quarters/2021-11-01/pad_coverage1_images")
     parser.add_argument('--num-workers', type=int, default=4)
     parser.add_argument('--batch-size', type=int, default=1)
     parser.add_argument('--cpu', action='store_true')

@@ -54,7 +54,7 @@ class ERFNetWrapper:
         label_color = Colorize()(label.unsqueeze(0))
         label_np = cv2.resize(label.numpy(), original_size)
         label_color_np = cv2.resize(label_color.numpy().transpose(1, 2, 0), original_size)
-        return label_np + 1, label_color_np
+        return label_np, label_color_np
 
 class ERFNetRos:
     def __init__(self):
