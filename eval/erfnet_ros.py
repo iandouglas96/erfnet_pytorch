@@ -54,14 +54,14 @@ class ERFNetWrapper:
         label_color = Colorize()(label.unsqueeze(0))
         label_np = cv2.resize(label.numpy(), original_size)
         label_color_np = cv2.resize(label_color.numpy().transpose(1, 2, 0), original_size)
-        return label_np, label_color_np
+        return label_np + 1, label_color_np
 
 class ERFNetRos:
     def __init__(self):
         self.erfnet_ = ERFNetWrapper('../trained_models/model_best.pth')
 
-        self.image_sub_ = rospy.Subscriber('image', Image, self.imageCallback, queue_size=10)
-        self.label_pub_ = rospy.Publisher('label', Image, queue_size=10)
+        self.image_sub_ = rospy.Subscriber('/asoom/img', Image, self.imageCallback, queue_size=10)
+        self.label_pub_ = rospy.Publisher('/asoom/sem', Image, queue_size=10)
         self.label_viz_pub_ =rospy.Publisher('label_viz', Image, queue_size=1)
 
     def imageCallback(self, img_msg):
