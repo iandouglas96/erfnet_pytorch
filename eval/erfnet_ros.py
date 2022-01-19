@@ -39,7 +39,7 @@ class ERFNetWrapper:
         print ("Model and weights LOADED successfully")
         self.model_.eval()
 
-    def infer(self, img_np):
+    def infer(self, img_np, gen_viz = False):
         original_size = (img_np.shape[1], img_np.shape[0])
         img_np = cv2.resize(img_np, (640, 400))
         # BGR to RGB
@@ -51,32 +51,36 @@ class ERFNetWrapper:
             outputs = self.model_(img)
 
         label = outputs[0].max(0)[1].byte().cpu().data
-        label_color = Colorize()(label.unsqueeze(0))
         label_np = cv2.resize(label.numpy(), original_size)
-        label_color_np = cv2.resize(label_color.numpy().transpose(1, 2, 0), original_size)
+        label_color_np = None
+        if gen_viz:
+            label_color = Colorize()(label.unsqueeze(0))
+            label_color_np = cv2.resize(label_color.numpy().transpose(1, 2, 0), original_size)
         return label_np, label_color_np
 
 class ERFNetRos:
     def __init__(self):
         self.erfnet_ = ERFNetWrapper('../trained_models/model_best.pth')
 
-        self.image_sub_ = rospy.Subscriber('/asoom/img', Image, self.imageCallback, queue_size=10)
+        self.gen_viz_ = rospy.get_param("gen_viz", default=False)
+
+        self.image_sub_ = rospy.Subscriber('/asoom/keyframe_img', Image, self.imageCallback, queue_size=100)
         self.label_pub_ = rospy.Publisher('/asoom/sem', Image, queue_size=10)
         self.label_viz_pub_ =rospy.Publisher('label_viz', Image, queue_size=1)
 
     def imageCallback(self, img_msg):
         img = np.frombuffer(img_msg.data, dtype=np.uint8).reshape(img_msg.height, img_msg.width, -1)
-        label, label_color = self.erfnet_.infer(img)
-        label_color = np.flip(label_color, axis=2)
-
-        label_viz_msg = Image()
-        label_viz_msg.header = img_msg.header
-        label_viz_msg.encoding = "bgr8"
-        label_viz_msg.height = label_color.shape[0]
-        label_viz_msg.width = label_color.shape[1]
-        label_viz_msg.step = label_viz_msg.width * 3
-        label_viz_msg.data = label_color.tobytes()
-        self.label_viz_pub_.publish(label_viz_msg)
+        label, label_color = self.erfnet_.infer(img, self.gen_viz_)
+        if label_color:
+            label_color = np.flip(label_color, axis=2)
+            label_viz_msg = Image()
+            label_viz_msg.header = img_msg.header
+            label_viz_msg.encoding = "bgr8"
+            label_viz_msg.height = label_color.shape[0]
+            label_viz_msg.width = label_color.shape[1]
+            label_viz_msg.step = label_viz_msg.width * 3
+            label_viz_msg.data = label_color.tobytes()
+            self.label_viz_pub_.publish(label_viz_msg)
 
         label_msg = Image()
         label_msg.header = img_msg.header
